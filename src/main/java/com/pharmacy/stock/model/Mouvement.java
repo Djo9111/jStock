@@ -34,66 +34,44 @@ public class Mouvement {
 
     /**
      * Quantité du mouvement
-     * - Positif pour ENTREE, RETOUR (entrée client)
-     * - Négatif pour SORTIE, PEREMPTION, AJUSTEMENT (si perte)
+     * - Positif pour ENTREE, RETOUR
+     * - Négatif pour SORTIE, PEREMPTION, AJUSTEMENT
      */
     @Column(name = "quantite", nullable = false)
     private Integer quantite;
 
     /**
      * Prix unitaire du mouvement
-     * - Pour ENTREE : prix d'achat fournisseur
-     * - Pour SORTIE : coût moyen actuel du stock
      */
     @Column(name = "prix_unitaire", nullable = false, precision = 10, scale = 2)
     private BigDecimal prixUnitaire;
 
     /**
-     * Montant total du mouvement
-     * Calculé automatiquement : quantite × prixUnitaire
+     * Montant total = quantite × prixUnitaire
      */
     @Column(name = "montant_total", nullable = false, precision = 10, scale = 2)
     private BigDecimal montantTotal;
 
-    /**
-     * Référence du document associé
-     * Exemples : N° facture, bon de commande, PV destruction
-     */
     @Column(name = "reference_document", length = 50)
     private String referenceDocument;
 
-    /**
-     * Observation ou commentaire sur le mouvement
-     */
     @Column(name = "observation", columnDefinition = "TEXT")
     private String observation;
 
-    /**
-     * Produit concerné par ce mouvement
-     * Relation Many-to-One avec Produit
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_produit", nullable = false)
     private Produit produit;
 
-    /**
-     * Fournisseur (uniquement pour les ENTREES)
-     * Relation Many-to-One avec Fournisseur
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_fournisseur")
     private Fournisseur fournisseur;
 
-    /**
-     * Utilisateur qui a créé ce mouvement (audit)
-     * Relation Many-to-One avec Utilisateur
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_utilisateur", nullable = false)
     private Utilisateur utilisateur;
 
     /**
-     * Constructeur sans relations (pour création)
+     * Constructeur métier
      */
     public Mouvement(LocalDateTime dateMouvement, TypeMouvement typeMouvement,
                      Integer quantite, BigDecimal prixUnitaire,
@@ -108,58 +86,77 @@ public class Mouvement {
     }
 
     /**
-     * Calcule automatiquement le montant total
-     * Appelé avant l'insertion/mise à jour en base
+     * 🔥 UNE SEULE méthode lifecycle JPA (corrige ton bug)
      */
     @PrePersist
     @PreUpdate
-    public void calculerMontantTotal() {
-        if (quantite != null && prixUnitaire != null) {
-            this.montantTotal = prixUnitaire.multiply(BigDecimal.valueOf(quantite));
+    public void prePersistOrUpdate() {
+        valider();
+        calculerMontantTotal();
+        initialiserDate();
+    }
+
+    /**
+     * Validation métier
+     */
+    private void valider() {
+        if (typeMouvement == null) {
+            throw new IllegalStateException("Le type de mouvement est obligatoire");
+        }
+
+        if (quantite == null || quantite == 0) {
+            throw new IllegalStateException("La quantité ne peut pas être nulle ou zéro");
+        }
+
+        // ENTREE
+        if (typeMouvement == TypeMouvement.ENTREE) {
+            if (fournisseur == null) {
+                throw new IllegalStateException("Un mouvement ENTREE doit avoir un fournisseur");
+            }
+            if (quantite <= 0) {
+                throw new IllegalStateException("Un mouvement ENTREE doit avoir une quantité positive");
+            }
+        }
+
+        // SORTIE
+        if (typeMouvement == TypeMouvement.SORTIE) {
+            if (fournisseur != null) {
+                throw new IllegalStateException("Un mouvement SORTIE ne doit pas avoir de fournisseur");
+            }
+            if (quantite >= 0) {
+                throw new IllegalStateException("Un mouvement SORTIE doit avoir une quantité négative");
+            }
         }
     }
 
     /**
-     * Vérifie si c'est un mouvement d'entrée
+     * Calcul automatique du montant
+     */
+    private void calculerMontantTotal() {
+        if (quantite != null && prixUnitaire != null) {
+            montantTotal = prixUnitaire.multiply(BigDecimal.valueOf(quantite));
+        }
+    }
+
+    /**
+     * Initialisation automatique de la date
+     */
+    private void initialiserDate() {
+        if (dateMouvement == null) {
+            dateMouvement = LocalDateTime.now();
+        }
+    }
+
+    /**
+     * Helpers métier
      */
     public boolean estEntree() {
         return typeMouvement == TypeMouvement.ENTREE || typeMouvement == TypeMouvement.RETOUR;
     }
 
-    /**
-     * Vérifie si c'est un mouvement de sortie
-     */
     public boolean estSortie() {
         return typeMouvement == TypeMouvement.SORTIE ||
                 typeMouvement == TypeMouvement.PEREMPTION ||
                 typeMouvement == TypeMouvement.AJUSTEMENT;
-    }
-
-    /**
-     * Valide le mouvement avant persistance
-     * - ENTREE doit avoir un fournisseur
-     * - SORTIE ne doit pas avoir de fournisseur
-     * - ENTREE doit avoir quantite positive
-     * - SORTIE doit avoir quantite négative
-     */
-    @PrePersist
-    public void validerMouvement() {
-        // Validation fournisseur
-        if (typeMouvement == TypeMouvement.ENTREE && fournisseur == null) {
-            throw new IllegalStateException("Un mouvement ENTREE doit avoir un fournisseur");
-        }
-
-        if (typeMouvement == TypeMouvement.SORTIE && fournisseur != null) {
-            throw new IllegalStateException("Un mouvement SORTIE ne doit pas avoir de fournisseur");
-        }
-
-        // Validation quantité
-        if (typeMouvement == TypeMouvement.ENTREE && quantite <= 0) {
-            throw new IllegalStateException("Un mouvement ENTREE doit avoir une quantité positive");
-        }
-
-        if (typeMouvement == TypeMouvement.SORTIE && quantite >= 0) {
-            throw new IllegalStateException("Un mouvement SORTIE doit avoir une quantité négative");
-        }
     }
 }
